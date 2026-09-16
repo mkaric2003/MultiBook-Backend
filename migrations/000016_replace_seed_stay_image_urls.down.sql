@@ -1,0 +1,2 @@
+-- Data migration: original redirect-only placeholder URLs are intentionally
+-- not restored.

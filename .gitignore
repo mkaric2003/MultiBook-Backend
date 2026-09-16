@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+
+bin/
+coverage.out
+dist/
+
+# Firebase Admin credentials
+service-account*.json
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/

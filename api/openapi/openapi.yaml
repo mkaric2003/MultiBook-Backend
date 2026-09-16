@@ -1,0 +1,1378 @@
+openapi: 3.1.0
+info:
+  title: MultiBook API
+  version: 1.0.0
+  description: Private API consumed by the MultiBook mobile applications.
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      responses:
+        '200':
+          description: API process is running
+  /readyz:
+    get:
+      summary: Readiness probe
+      responses:
+        '200':
+          description: Database connection is healthy
+        '503':
+          description: Database is unavailable
+  /v1/users/me:
+    get:
+      summary: Read and provision the authenticated user profile
+      security:
+        - firebaseBearer: []
+      responses:
+        '200':
+          description: Verified Firebase user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Missing or invalid Firebase ID token
+    patch:
+      summary: Update the authenticated user profile
+      security:
+        - firebaseBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMyProfileRequest'
+      responses:
+        '200':
+          description: Updated user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401': { description: Missing or invalid Firebase ID token }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/users/me/role:
+    put:
+      summary: Select the authenticated user's marketplace role
+      security:
+        - firebaseBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  type: string
+                  enum: [customer, provider]
+      responses:
+        '200':
+          description: Updated user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401': { description: Missing or invalid Firebase ID token }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/users/me/selected-business:
+    put:
+      summary: Select an owned business as the authenticated provider's active business
+      security:
+        - firebaseBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [business_id]
+              properties:
+                business_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Active business selected
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [selected_business_id]
+                properties:
+                  selected_business_id: { type: string, format: uuid }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses:
+    post:
+      summary: Create a business owned by the authenticated provider
+      security:
+        - firebaseBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBusinessRequest'
+      responses:
+        '201':
+          description: Created complete business aggregate, directly decodable by Flutter BusinessModel
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessModelResponse' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    get:
+      summary: List lightweight summaries of businesses owned by the authenticated provider
+      security:
+        - firebaseBearer: []
+      responses:
+        '200':
+          description: Lightweight owned-business summaries for selectors, tabs and lists. Use GET /v1/businesses/{businessID} before opening the full editor.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/BusinessSummaryResponse' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+  /v1/discovery/businesses:
+    get:
+      summary: List public businesses for discovery
+      description: Customer discovery feed used by Popular Near You and the default Other businesses lists. Supplying city filters the page to that city; omitting it returns the global ranking. Results are lightweight camelCase BusinessModel-compatible cards ordered by rating and review count.
+      security:
+        - firebaseBearer: []
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema: { type: string, enum: [stays, services] }
+        - name: city
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 30, default: 10 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Page of popular nearby businesses
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextOffset]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/BusinessSummaryResponse' }
+                  nextOffset: { type: integer, minimum: 0 }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/discovery/search:
+    get:
+      summary: Search public businesses by name or city
+      description: Text search for customer stay and service listings. Matching uses normalized name and city prefixes.
+      security:
+        - firebaseBearer: []
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema: { type: string, enum: [stays, services] }
+        - name: query
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 30, default: 20 }
+      responses:
+        '200':
+          description: Matching discovery cards
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/BusinessSummaryResponse' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/development/seed/stays:
+    post:
+      summary: Seed demo stay businesses in development only
+      description: Provider-only and available only when APP_ENV is development. Demo cover media is a direct HTTPS URL, not a Firebase Storage path.
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '201':
+          description: Demo stays created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DevelopmentSeedResult' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+  /v1/development/seed/services:
+    post:
+      summary: Seed demo service businesses in development only
+      description: Provider-only and available only when APP_ENV is development. Demo cover media is a direct HTTPS URL, not a Firebase Storage path.
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '201':
+          description: Demo service businesses created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DevelopmentSeedResult' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+  /v1/businesses/{businessID}:
+    parameters:
+      - name: businessID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Get the complete aggregate of an owned business for the provider editor
+      security:
+        - firebaseBearer: []
+      responses:
+        '200':
+          description: Complete BusinessModel aggregate. The authenticated provider must own the business.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessModelResponse' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+    put:
+      summary: Replace an owned business aggregate
+      description: Uses the existing Flutter BusinessModel.toMap() camelCase payload. This is a full replacement; fetch the detail endpoint before editing so nested stay or service fields are preserved.
+      security:
+        - firebaseBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateBusinessRequest' }
+      responses:
+        '200':
+          description: Replaced complete business aggregate
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessModelResponse' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    patch:
+      summary: Update editable fields of an owned business
+      security:
+        - firebaseBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateBusinessRequest' }
+      responses:
+        '200':
+          description: Updated business
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Business' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      summary: Archive an owned business
+      security:
+        - firebaseBearer: []
+      responses:
+        '204': { description: Business archived }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/businesses/{businessID}/location:
+    parameters:
+      - $ref: '#/components/parameters/BusinessID'
+    put:
+      summary: Create or replace the primary location of an owned business
+      security: [{ firebaseBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpsertBusinessLocationRequest' }
+      responses:
+        '200': { description: Saved location, content: { application/json: { schema: { $ref: '#/components/schemas/BusinessLocation' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/dashboard-metrics:
+    parameters:
+      - $ref: '#/components/parameters/BusinessID'
+    get:
+      summary: Get the owned business's current dashboard metrics
+      description: Reads active reservations and current UTC calendar-month revenue directly from PostgreSQL reservation records. Earnings payment/staff breakdowns are intentionally excluded.
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '200':
+          description: Current dashboard metrics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardMetrics' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/dashboard-metrics/stream:
+    parameters:
+      - $ref: '#/components/parameters/BusinessID'
+    get:
+      summary: Stream live dashboard metrics for an owned business
+      description: A Server-Sent Events stream. Emits dashboard_metrics immediately and after each committed reservation change; comment heartbeats keep idle connections alive.
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '200':
+          description: Server-Sent Events containing DashboardMetrics JSON in each dashboard_metrics event
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/earnings:
+    parameters:
+      - $ref: '#/components/parameters/BusinessID'
+      - { name: startDate, in: query, required: true, schema: { type: string, format: date } }
+      - { name: endDate, in: query, required: true, schema: { type: string, format: date } }
+      - { name: utcOffsetMinutes, in: query, schema: { type: integer, minimum: -840, maximum: 840, default: 0 }, description: Client UTC offset used for calendar boundaries and daily grouping }
+      - { name: staffId, in: query, schema: { type: string, format: uuid } }
+    get:
+      summary: Get earnings metrics for an owned business and inclusive creation-date range
+      description: Cash reservations contribute while confirmed or completed. Non-cash reservations additionally require paid payment status. An optional staffId filters service appointments and returns their historically stored earnings.
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '200':
+          description: Earnings metrics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EarningsMetrics' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/earnings/stream:
+    parameters:
+      - $ref: '#/components/parameters/BusinessID'
+      - { name: startDate, in: query, required: true, schema: { type: string, format: date } }
+      - { name: endDate, in: query, required: true, schema: { type: string, format: date } }
+      - { name: utcOffsetMinutes, in: query, schema: { type: integer, minimum: -840, maximum: 840, default: 0 }, description: Client UTC offset used for calendar boundaries and daily grouping }
+      - { name: staffId, in: query, schema: { type: string, format: uuid } }
+    get:
+      summary: Stream live earnings metrics for an owned business and date range
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '200':
+          description: Server-Sent Events containing EarningsMetrics JSON in each earnings_metrics event
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/media:
+    parameters:
+      - $ref: '#/components/parameters/BusinessID'
+    put:
+      summary: Atomically replace media metadata for an owned business
+      security: [{ firebaseBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReplaceBusinessMediaRequest' }
+      responses:
+        '200': { description: Saved media, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/BusinessMedia' } } } } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/stay:
+    parameters:
+      - $ref: '#/components/parameters/BusinessID'
+    get:
+      summary: Get details of an owned stay business
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '200': { description: Stay details, content: { application/json: { schema: { $ref: '#/components/schemas/StayDetails' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+    put:
+      summary: Create or replace details of an owned stay business
+      security: [{ firebaseBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpsertStayDetailsRequest' }
+      responses:
+        '200': { description: Saved stay details, content: { application/json: { schema: { $ref: '#/components/schemas/StayDetails' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/stay/unit-types:
+    parameters:
+      - $ref: '#/components/parameters/BusinessID'
+    get:
+      summary: List unit types of an owned multiple-unit stay
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '200':
+          description: Stay unit types
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/StayUnitType' }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+    post:
+      summary: Create a unit type and materialize its bookable units
+      security: [{ firebaseBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateStayUnitTypeRequest' }
+      responses:
+        '201': { description: Created unit type, content: { application/json: { schema: { $ref: '#/components/schemas/StayUnitType' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/stay/unit-types/{unitTypeID}:
+    parameters:
+      - $ref: '#/components/parameters/BusinessID'
+      - name: unitTypeID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      summary: Update a unit type of an owned multiple-unit stay
+      security: [{ firebaseBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateStayUnitTypeRequest' }
+      responses:
+        '200': { description: Updated unit type, content: { application/json: { schema: { $ref: '#/components/schemas/StayUnitType' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      summary: Archive a unit type and its materialized units
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '204': { description: Unit type archived }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/businesses/{businessID}/service:
+    parameters: [{ $ref: '#/components/parameters/BusinessID' }]
+    get:
+      summary: Get details of an owned service business
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '200': { description: Service details, content: { application/json: { schema: { $ref: '#/components/schemas/ServiceDetails' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+    put:
+      summary: Create or replace details of an owned service business
+      security: [{ firebaseBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpsertServiceDetailsRequest' } } } }
+      responses:
+        '200': { description: Saved service details, content: { application/json: { schema: { $ref: '#/components/schemas/ServiceDetails' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/service/offerings:
+    parameters: [{ $ref: '#/components/parameters/BusinessID' }]
+    get:
+      summary: List service offerings of an owned service business
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '200': { description: Service offerings, content: { application/json: { schema: { $ref: '#/components/schemas/ServiceOfferingList' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+    post:
+      summary: Create a service offering
+      security: [{ firebaseBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateServiceOfferingRequest' } } } }
+      responses:
+        '201': { description: Created service offering, content: { application/json: { schema: { $ref: '#/components/schemas/ServiceOffering' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/service/offerings/{offeringID}:
+    parameters: [{ $ref: '#/components/parameters/BusinessID' }, { name: offeringID, in: path, required: true, schema: { type: string, format: uuid } }]
+    patch:
+      summary: Update a service offering
+      security: [{ firebaseBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateServiceOfferingRequest' } } } }
+      responses:
+        '200': { description: Updated service offering, content: { application/json: { schema: { $ref: '#/components/schemas/ServiceOffering' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      summary: Archive a service offering
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '204': { description: Service offering archived }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/businesses/{businessID}/service/staff:
+    parameters: [{ $ref: '#/components/parameters/BusinessID' }]
+    get:
+      summary: List staff of an owned service business
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '200': { description: Service staff, content: { application/json: { schema: { $ref: '#/components/schemas/ServiceStaffList' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+    post:
+      summary: Create a service staff member
+      security: [{ firebaseBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateServiceStaffRequest' } } } }
+      responses:
+        '201': { description: Created staff member, content: { application/json: { schema: { $ref: '#/components/schemas/ServiceStaff' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/service/staff/{staffID}:
+    parameters: [{ $ref: '#/components/parameters/BusinessID' }, { $ref: '#/components/parameters/StaffID' }]
+    patch:
+      summary: Update a service staff member
+      security: [{ firebaseBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateServiceStaffRequest' } } } }
+      responses:
+        '200': { description: Updated staff member, content: { application/json: { schema: { $ref: '#/components/schemas/ServiceStaff' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      summary: Archive a service staff member
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '204': { description: Service staff archived }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/businesses/{businessID}/service/staff/{staffID}/weekly-availability:
+    parameters: [{ $ref: '#/components/parameters/BusinessID' }, { $ref: '#/components/parameters/StaffID' }]
+    get:
+      summary: List weekly availability intervals for a staff member
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '200': { description: Weekly availability, content: { application/json: { schema: { $ref: '#/components/schemas/WeeklyAvailabilityList' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+    post:
+      summary: Add a weekly availability interval
+      security: [{ firebaseBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateWeeklyAvailabilityRequest' } } } }
+      responses:
+        '201': { description: Created weekly availability, content: { application/json: { schema: { $ref: '#/components/schemas/WeeklyAvailability' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/service/staff/{staffID}/weekly-availability/{weeklyAvailabilityID}:
+    parameters: [{ $ref: '#/components/parameters/BusinessID' }, { $ref: '#/components/parameters/StaffID' }, { name: weeklyAvailabilityID, in: path, required: true, schema: { type: string, format: uuid } }]
+    patch:
+      summary: Update a weekly availability interval
+      security: [{ firebaseBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateWeeklyAvailabilityRequest' } } } }
+      responses:
+        '200': { description: Updated weekly availability, content: { application/json: { schema: { $ref: '#/components/schemas/WeeklyAvailability' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      summary: Delete a weekly availability interval
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '204': { description: Weekly availability deleted }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/businesses/{businessID}/service/staff/{staffID}/availability-blocks:
+    parameters: [{ $ref: '#/components/parameters/BusinessID' }, { $ref: '#/components/parameters/StaffID' }]
+    get:
+      summary: List manual availability blocks for a staff member
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '200': { description: Availability blocks, content: { application/json: { schema: { $ref: '#/components/schemas/AvailabilityBlockList' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+    post:
+      summary: Add a manual availability block
+      security: [{ firebaseBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateAvailabilityBlockRequest' } } } }
+      responses:
+        '201': { description: Created availability block, content: { application/json: { schema: { $ref: '#/components/schemas/AvailabilityBlock' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/service/staff/{staffID}/availability-blocks/{availabilityBlockID}:
+    parameters: [{ $ref: '#/components/parameters/BusinessID' }, { $ref: '#/components/parameters/StaffID' }, { name: availabilityBlockID, in: path, required: true, schema: { type: string, format: uuid } }]
+    patch:
+      summary: Update a manual availability block
+      security: [{ firebaseBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateAvailabilityBlockRequest' } } } }
+      responses:
+        '200': { description: Updated availability block, content: { application/json: { schema: { $ref: '#/components/schemas/AvailabilityBlock' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      summary: Delete a manual availability block
+      security: [{ firebaseBearer: [] }]
+      responses:
+        '204': { description: Availability block deleted }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+  /v1/businesses/{businessID}/service/appointments:
+    parameters: [{ $ref: '#/components/parameters/BusinessID' }]
+    post:
+      summary: Create a confirmed appointment for the authenticated customer
+      security: [{ firebaseBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateAppointmentRequest' } } } }
+      responses:
+        '201': { description: Confirmed appointment, content: { application/json: { schema: { $ref: '#/components/schemas/Appointment' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { description: Staff member is unavailable for the requested range }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/businesses/{businessID}/service/staff/{staffID}/available-slots:
+    parameters: [{ $ref: '#/components/parameters/BusinessID' }, { $ref: '#/components/parameters/StaffID' }]
+    get:
+      summary: Return available 30-minute appointment start times for selected offerings
+      security: [{ firebaseBearer: [] }]
+      parameters:
+        - name: appointment_date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: offering_id
+          in: query
+          required: true
+          explode: true
+          schema: { type: array, minItems: 1, uniqueItems: true, items: { type: string, format: uuid } }
+      responses:
+        '200': { description: Available starts, content: { application/json: { schema: { $ref: '#/components/schemas/AvailableSlots' } } } }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/appointments:
+    get:
+      summary: List appointments for the authenticated customer or provider
+      security: [{ firebaseBearer: [] }]
+      parameters:
+        - name: business_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { type: string, enum: [confirmed, declined, cancelled, completed, no_show] }
+      responses:
+        '200': { description: Appointments, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Appointment' } } } } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+  /v1/appointments/{appointmentID}/status:
+    parameters: [{ name: appointmentID, in: path, required: true, schema: { type: string, format: uuid } }]
+    patch:
+      summary: Cancel, decline, complete, or mark an appointment as no-show
+      security: [{ firebaseBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [cancelled, declined, completed, no_show] } } } } } }
+      responses:
+        '200': { description: Updated appointment, content: { application/json: { schema: { $ref: '#/components/schemas/Appointment' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { description: Appointment cannot transition from its current state }
+  /v1/appointments/{appointmentID}/reschedule:
+    parameters: [{ name: appointmentID, in: path, required: true, schema: { type: string, format: uuid } }]
+    patch:
+      summary: Reschedule a confirmed appointment
+      security: [{ firebaseBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RescheduleAppointmentRequest' } } } }
+      responses:
+        '200': { description: Rescheduled appointment, content: { application/json: { schema: { $ref: '#/components/schemas/Appointment' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenError' }
+        '404': { $ref: '#/components/responses/NotFoundError' }
+        '409': { description: Requested appointment time is unavailable }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /v1/services/search:
+    get:
+      summary: Search active service businesses, optionally constrained by a requested start time
+      security: [{ firebaseBearer: [] }]
+      parameters:
+        - { name: city, in: query, schema: { type: string } }
+        - { name: category_id, in: query, schema: { type: string } }
+        - { name: min_price_minor, in: query, schema: { type: integer, format: int64, minimum: 0 } }
+        - { name: max_price_minor, in: query, schema: { type: integer, format: int64, minimum: 0 } }
+        - { name: appointment_date, in: query, schema: { type: string, format: date } }
+        - { name: start_minutes, in: query, schema: { type: integer, multipleOf: 30, minimum: 0, maximum: 1410 } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 20 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200': { description: Service results, content: { application/json: { schema: { type: object, required: [items, next_offset], properties: { items: { type: array, items: { $ref: '#/components/schemas/ServiceSearchItem' } }, next_offset: { type: integer } } } } } }
+        '422': { $ref: '#/components/responses/ValidationError' }
+components:
+  parameters:
+    BusinessID:
+      name: businessID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    StaffID:
+      name: staffID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  securitySchemes:
+    firebaseBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: Firebase ID token
+  schemas:
+    User:
+      type: object
+      required: [id, business_currency, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          nullable: true
+        full_name:
+          type: string
+          nullable: true
+        first_name:
+          type: string
+          nullable: true
+        last_name:
+          type: string
+          nullable: true
+        role:
+          type: string
+          enum: [customer, provider, admin]
+          nullable: true
+        phone_e164:
+          type: string
+          nullable: true
+          description: Phone number in E.164 format when supplied.
+        avatar_storage_path:
+          type: string
+          nullable: true
+          description: Firebase Storage path, not a download URL.
+        country_code:
+          type: string
+          nullable: true
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        business_currency:
+          type: string
+          enum: [BAM, USD, EUR, CHF, GBP]
+        selected_business_id: { type: string, nullable: true }
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    UpdateMyProfileRequest:
+      type: object
+      properties:
+        first_name: { type: string }
+        last_name: { type: string }
+        phone_e164: { type: string }
+        avatar_storage_path: { type: string }
+        country_code: { type: string }
+        date_of_birth: { type: string, format: date }
+        address: { type: string }
+        city: { type: string }
+        business_currency:
+          type: string
+          enum: [BAM, USD, EUR, CHF, GBP]
+    Business:
+      type: object
+      required:
+        [id, owner_id, type, status, name, category_id, currency, average_rating, review_count, is_promotion_active, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        owner_id: { type: string }
+        type: { type: string, enum: [stay, service] }
+        status: { type: string, enum: [draft, active, inactive, archived] }
+        name: { type: string }
+        category_id: { type: string }
+        currency: { type: string, enum: [BAM, USD, EUR, CHF, GBP] }
+        short_description: { type: string, nullable: true }
+        average_rating: { type: number, format: double }
+        review_count: { type: integer, minimum: 0 }
+        is_promotion_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    DashboardMetrics:
+      type: object
+      required: [businessId, businessType, currency, activeReservationCount, currentMonth]
+      properties:
+        businessId: { type: string, format: uuid }
+        businessType: { type: string, enum: [stay, service] }
+        currency: { type: string, enum: [BAM, USD, EUR, CHF, GBP] }
+        activeReservationCount: { type: integer, minimum: 0 }
+        currentMonth:
+          $ref: '#/components/schemas/DashboardMetricsMonth'
+    DashboardMetricsMonth:
+      type: object
+      required: [monthKey, revenueMinor, reservationCount, dailyRevenueMinor, dailyReservationCount]
+      properties:
+        monthKey:
+          type: string
+          pattern: '^\d{4}-\d{2}$'
+        revenueMinor: { type: integer, format: int64, minimum: 0 }
+        reservationCount: { type: integer, minimum: 0 }
+        dailyRevenueMinor:
+          type: object
+          additionalProperties: { type: integer, format: int64, minimum: 0 }
+        dailyReservationCount:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+    EarningsMetrics:
+      type: object
+      required: [businessId, businessType, currency, startDate, endDate, revenueMinor, reservationCount, onlineRevenueMinor, cashRevenueMinor, staffEarningsMinor, dailyRevenueMinor, dailyReservationCount, dailyOnlineRevenueMinor, dailyCashRevenueMinor, dailyStaffEarningsMinor]
+      properties:
+        businessId: { type: string, format: uuid }
+        businessType: { type: string, enum: [stay, service] }
+        currency: { type: string, enum: [BAM, USD, EUR, CHF, GBP] }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        staffId: { type: string, format: uuid, nullable: true }
+        revenueMinor: { type: integer, format: int64, minimum: 0 }
+        reservationCount: { type: integer, minimum: 0 }
+        onlineRevenueMinor: { type: integer, format: int64, minimum: 0 }
+        cashRevenueMinor: { type: integer, format: int64, minimum: 0 }
+        staffEarningsMinor: { type: integer, format: int64, minimum: 0 }
+        dailyRevenueMinor: { type: object, additionalProperties: { type: integer, format: int64, minimum: 0 } }
+        dailyReservationCount: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        dailyOnlineRevenueMinor: { type: object, additionalProperties: { type: integer, format: int64, minimum: 0 } }
+        dailyCashRevenueMinor: { type: object, additionalProperties: { type: integer, format: int64, minimum: 0 } }
+        dailyStaffEarningsMinor: { type: object, additionalProperties: { type: integer, format: int64, minimum: 0 } }
+    BusinessModelResponse:
+      description: Complete aggregate encoded with the existing Flutter BusinessModel mapper's camelCase field names.
+      type: object
+      required: [id, ownerId, type, name, categoryId, location, currency, photoUrls, featuredCollectionIds, isActive, averageRating, reviewCount, isPromotionActive]
+      properties:
+        id: { type: string, format: uuid }
+        ownerId: { type: string }
+        type: { type: string, enum: [stays, services] }
+        name: { type: string }
+        categoryId: { type: string }
+        location:
+          type: object
+          required: [city, address, latitude, longitude]
+          properties:
+            city: { type: string }
+            address: { type: string }
+            latitude: { type: number, format: double }
+            longitude: { type: number, format: double }
+        currency: { type: string, enum: [BAM, USD, EUR, CHF, GBP] }
+        shortDescription: { type: string, nullable: true }
+        logoUrl: { type: string, nullable: true, description: Firebase Storage path }
+        coverPhotoUrl: { type: string, nullable: true, description: Firebase Storage path }
+        photoUrls: { type: array, items: { type: string } }
+        featuredCollectionIds: { type: array, items: { type: string } }
+        isActive: { type: boolean }
+        averageRating: { type: number, format: double }
+        reviewCount: { type: integer }
+        isPromotionActive: { type: boolean }
+        stayDetails: { type: object, nullable: true }
+        serviceDetails: { type: object, nullable: true }
+        createdAt: { type: string, format: date-time, nullable: true }
+        updatedAt: { type: string, format: date-time, nullable: true }
+    BusinessSummaryResponse:
+      description: Lightweight camelCase BusinessModel-compatible summary returned by GET /v1/businesses. It omits nested amenities, extras, rooms and service staffing; obtain those from GET /v1/businesses/{businessID} only when needed.
+      type: object
+      required: [id, ownerId, type, name, categoryId, location, currency, photoUrls, featuredCollectionIds, isActive, averageRating, reviewCount, isPromotionActive]
+      properties:
+        id: { type: string, format: uuid }
+        ownerId: { type: string }
+        type: { type: string, enum: [stays, services] }
+        name: { type: string }
+        categoryId: { type: string }
+        location: { type: object }
+        currency: { type: string, enum: [BAM, USD, EUR, CHF, GBP] }
+        shortDescription: { type: string, nullable: true }
+        logoUrl: { type: string, nullable: true, description: Firebase Storage path }
+        coverPhotoUrl: { type: string, nullable: true, description: Firebase Storage path }
+        photoUrls: { type: array, items: { type: string } }
+        featuredCollectionIds: { type: array, items: { type: string } }
+        stayDetails: { type: object, nullable: true, description: Summary contains only pricePerNight and inventoryType. }
+        isActive: { type: boolean }
+        averageRating: { type: number, format: double }
+        reviewCount: { type: integer }
+        isPromotionActive: { type: boolean }
+        createdAt: { type: string, format: date-time, nullable: true }
+        updatedAt: { type: string, format: date-time, nullable: true }
+    CreateBusinessRequest:
+      description: Existing Flutter BusinessModel.toMap() payload. Server-managed fields (id, ownerId, ratings and timestamps) are ignored on create.
+      type: object
+      required: [type, name, categoryId, location]
+      properties:
+        type: { type: string, enum: [stays, services] }
+        name: { type: string }
+        categoryId: { type: string }
+        shortDescription: { type: string, nullable: true }
+        location:
+          type: object
+          required: [city, address, latitude, longitude]
+          properties:
+            city: { type: string }
+            address: { type: string }
+            latitude: { type: number, format: double }
+            longitude: { type: number, format: double }
+        logoUrl: { type: string, nullable: true, description: Firebase Storage path }
+        coverPhotoUrl: { type: string, nullable: true, description: Firebase Storage path }
+        photoUrls: { type: array, maxItems: 7, items: { type: string, description: Firebase Storage path } }
+        featuredCollectionIds:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        stayDetails: { type: object, nullable: true, description: Existing Flutter StayDetailsModel map }
+        serviceDetails: { type: object, nullable: true, description: Existing Flutter ServiceDetailsModel map }
+    CreateBusinessLocation:
+      type: object
+      required: [city, address, latitude, longitude]
+      properties:
+        city: { type: string }
+        address: { type: string }
+        country_code: { type: string, nullable: true }
+        latitude: { type: number, format: double, minimum: -90, maximum: 90 }
+        longitude: { type: number, format: double, minimum: -180, maximum: 180 }
+    CreateBusinessMedia:
+      type: object
+      required: [media_type, storage_path]
+      properties:
+        media_type: { type: string, enum: [logo, cover, gallery] }
+        storage_path: { type: string, description: Firebase Storage path, not a download URL }
+        position: { type: integer, nullable: true, minimum: 0, maximum: 6 }
+    CreateStayBusinessDetails:
+      type: object
+      required: [inventory_type, amenities]
+      properties:
+        inventory_type: { type: string, enum: [single_unit, multiple_units] }
+        base_price_minor: { type: integer, format: int64, nullable: true, minimum: 0 }
+        amenities: { type: array, uniqueItems: true, items: { type: string } }
+        unit_types: { type: array, items: { $ref: '#/components/schemas/CreateStayUnitTypeRequest' } }
+        extras: { type: array, items: { type: object, required: [type, price_minor, pricing_unit], properties: { type: { type: string }, price_minor: { type: integer, format: int64, minimum: 0 }, pricing_unit: { type: string, enum: [per_night, one_time, per_hour] } } } }
+    CreateServiceBusinessDetails:
+      type: object
+      required: [time_zone, offerings, staff]
+      properties:
+        time_zone: { type: string }
+        offerings: { type: array, minItems: 1, items: { $ref: '#/components/schemas/CreateAggregateOffering' } }
+        staff: { type: array, minItems: 1, items: { $ref: '#/components/schemas/CreateAggregateStaff' } }
+    CreateAggregateOffering:
+      type: object
+      required: [client_id, name, duration_minutes, price_minor]
+      properties:
+        client_id: { type: string, description: Client-local ID used by staff offering_client_ids }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        duration_minutes: { type: integer, minimum: 5, maximum: 1440 }
+        price_minor: { type: integer, format: int64, minimum: 0 }
+        is_active: { type: boolean }
+    CreateAggregateStaff:
+      type: object
+      required: [name, offering_client_ids, weekly_availability]
+      properties:
+        name: { type: string }
+        title: { type: string, nullable: true }
+        commission_rate: { type: number, minimum: 0, maximum: 100 }
+        is_active: { type: boolean }
+        offering_client_ids: { type: array, minItems: 1, uniqueItems: true, items: { type: string } }
+        weekly_availability: { type: array, minItems: 1, items: { type: object, required: [weekday, start_minutes, end_minutes], properties: { weekday: { type: integer, minimum: 0, maximum: 6 }, start_minutes: { type: integer, minimum: 0, maximum: 1439 }, end_minutes: { type: integer, minimum: 1, maximum: 1440 } } } }
+    BusinessLocation:
+      type: object
+      required: [id, city, address, latitude, longitude]
+      properties:
+        id: { type: string, format: uuid }
+        city: { type: string }
+        address: { type: string }
+        country_code: { type: string, nullable: true }
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+    UpsertBusinessLocationRequest:
+      type: object
+      required: [city, address, latitude, longitude]
+      properties:
+        city: { type: string }
+        address: { type: string }
+        country_code: { type: string, nullable: true }
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+    BusinessMedia:
+      type: object
+      required: [id, media_type, storage_path]
+      properties:
+        id: { type: string, format: uuid }
+        media_type: { type: string, enum: [logo, cover, gallery] }
+        storage_path: { type: string }
+        position: { type: integer, nullable: true, minimum: 0, maximum: 6 }
+    ReplaceBusinessMediaRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 9
+          items:
+            type: object
+            required: [media_type, storage_path]
+            properties:
+              media_type: { type: string, enum: [logo, cover, gallery] }
+              storage_path: { type: string }
+              position: { type: integer, nullable: true, minimum: 0, maximum: 6 }
+    StayDetails:
+      type: object
+      required: [business_id, inventory_type, amenities, created_at, updated_at]
+      properties:
+        business_id: { type: string, format: uuid }
+        inventory_type: { type: string, enum: [single_unit, multiple_units] }
+        base_price_minor: { type: integer, format: int64, nullable: true, minimum: 0 }
+        amenities:
+          type: array
+          items:
+            type: string
+            enum: [wifi, parking, pool, spa, pet_friendly, gym, air_conditioning, heating, kitchen, washer, balcony, sea_view, mountain_view, workspace, elevator, ski_in_ski_out, ski_storage, ski_rental, ski_shuttle]
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    UpsertStayDetailsRequest:
+      type: object
+      required: [inventory_type, amenities]
+      properties:
+        inventory_type: { type: string, enum: [single_unit, multiple_units] }
+        base_price_minor: { type: integer, format: int64, nullable: true, minimum: 0 }
+        amenities:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum: [wifi, parking, pool, spa, pet_friendly, gym, air_conditioning, heating, kitchen, washer, balcony, sea_view, mountain_view, workspace, elevator, ski_in_ski_out, ski_storage, ski_rental, ski_shuttle]
+    StayUnitType:
+      type: object
+      required: [id, business_id, name, max_guests, size_square_meters, price_per_night_minor, quantity, is_active, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        business_id: { type: string, format: uuid }
+        name: { type: string }
+        max_guests: { type: integer, minimum: 1 }
+        size_square_meters: { type: integer, minimum: 0 }
+        price_per_night_minor: { type: integer, format: int64, minimum: 0 }
+        quantity: { type: integer, minimum: 1 }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateStayUnitTypeRequest:
+      type: object
+      required: [name, max_guests, size_square_meters, price_per_night_minor, quantity]
+      properties:
+        name: { type: string }
+        max_guests: { type: integer, minimum: 1 }
+        size_square_meters: { type: integer, minimum: 0 }
+        price_per_night_minor: { type: integer, format: int64, minimum: 0 }
+        quantity: { type: integer, minimum: 1 }
+        is_active: { type: boolean, default: true }
+    UpdateStayUnitTypeRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string }
+        max_guests: { type: integer, minimum: 1 }
+        size_square_meters: { type: integer, minimum: 0 }
+        price_per_night_minor: { type: integer, format: int64, minimum: 0 }
+        quantity: { type: integer, minimum: 1 }
+        is_active: { type: boolean }
+    ServiceDetails:
+      type: object
+      required: [business_id, time_zone, created_at, updated_at]
+      properties:
+        business_id: { type: string, format: uuid }
+        time_zone: { type: string, description: IANA time zone identifier }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    UpsertServiceDetailsRequest:
+      type: object
+      required: [time_zone]
+      properties:
+        time_zone: { type: string, description: IANA time zone identifier }
+    ServiceOffering:
+      type: object
+      required: [id, business_id, name, duration_minutes, price_minor, is_active, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        business_id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        duration_minutes: { type: integer, minimum: 5, maximum: 1440 }
+        price_minor: { type: integer, format: int64, minimum: 0 }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ServiceOfferingList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ServiceOffering' } }
+    CreateServiceOfferingRequest:
+      type: object
+      required: [name, duration_minutes, price_minor]
+      properties:
+        name: { type: string }
+        description: { type: string, nullable: true }
+        duration_minutes: { type: integer, minimum: 5, maximum: 1440 }
+        price_minor: { type: integer, format: int64, minimum: 0 }
+        is_active: { type: boolean, default: true }
+    UpdateServiceOfferingRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string }
+        description: { type: string, nullable: true }
+        duration_minutes: { type: integer, minimum: 5, maximum: 1440 }
+        price_minor: { type: integer, format: int64, minimum: 0 }
+        is_active: { type: boolean }
+    ServiceStaff:
+      type: object
+      required: [id, business_id, name, commission_rate, is_active, offering_ids, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        business_id: { type: string, format: uuid }
+        name: { type: string }
+        title: { type: string, nullable: true }
+        commission_rate: { type: number, format: double, minimum: 0, maximum: 100 }
+        is_active: { type: boolean }
+        offering_ids: { type: array, items: { type: string, format: uuid }, uniqueItems: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ServiceStaffList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ServiceStaff' } }
+    CreateServiceStaffRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        title: { type: string, nullable: true }
+        commission_rate: { type: number, format: double, minimum: 0, maximum: 100, default: 100 }
+        is_active: { type: boolean, default: true }
+        offering_ids: { type: array, items: { type: string, format: uuid }, uniqueItems: true }
+    UpdateServiceStaffRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string }
+        title: { type: string, nullable: true }
+        commission_rate: { type: number, format: double, minimum: 0, maximum: 100 }
+        is_active: { type: boolean }
+        offering_ids: { type: array, items: { type: string, format: uuid }, uniqueItems: true }
+    WeeklyAvailability:
+      type: object
+      required: [id, staff_id, weekday, start_minutes, end_minutes, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        staff_id: { type: string, format: uuid }
+        weekday: { type: integer, minimum: 0, maximum: 6, description: Monday is 0 and Sunday is 6 }
+        start_minutes: { type: integer, minimum: 0, maximum: 1439, description: Minutes after midnight }
+        end_minutes: { type: integer, minimum: 1, maximum: 1440, description: Minutes after midnight }
+        created_at: { type: string, format: date-time }
+    WeeklyAvailabilityList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/WeeklyAvailability' } }
+    CreateWeeklyAvailabilityRequest:
+      type: object
+      required: [weekday, start_minutes, end_minutes]
+      properties:
+        weekday: { type: integer, minimum: 0, maximum: 6 }
+        start_minutes: { type: integer, minimum: 0, maximum: 1439 }
+        end_minutes: { type: integer, minimum: 1, maximum: 1440 }
+    UpdateWeeklyAvailabilityRequest:
+      type: object
+      minProperties: 1
+      properties:
+        weekday: { type: integer, minimum: 0, maximum: 6 }
+        start_minutes: { type: integer, minimum: 0, maximum: 1439 }
+        end_minutes: { type: integer, minimum: 1, maximum: 1440 }
+    AvailabilityBlock:
+      type: object
+      required: [id, staff_id, start_at, end_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        staff_id: { type: string, format: uuid }
+        start_at: { type: string, format: date-time }
+        end_at: { type: string, format: date-time }
+        reason: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+    AvailabilityBlockList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AvailabilityBlock' } }
+    CreateAvailabilityBlockRequest:
+      type: object
+      required: [start_at, end_at]
+      properties:
+        start_at: { type: string, format: date-time }
+        end_at: { type: string, format: date-time }
+        reason: { type: string, nullable: true }
+    UpdateAvailabilityBlockRequest:
+      type: object
+      minProperties: 1
+      properties:
+        start_at: { type: string, format: date-time }
+        end_at: { type: string, format: date-time }
+        reason: { type: string, nullable: true }
+    AppointmentOffering:
+      type: object
+      required: [id, name, duration_minutes, price_minor]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        duration_minutes: { type: integer }
+        price_minor: { type: integer, format: int64 }
+    Appointment:
+      type: object
+      required: [id, business_id, customer_id, staff_id, appointment_date, start_minutes, end_minutes, service_cost_minor, total_minor, currency, payment_status, payment_method, confirmation_code, status, offerings, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        business_id: { type: string, format: uuid }
+        customer_id: { type: string }
+        staff_id: { type: string, format: uuid }
+        business_name: { type: string }
+        provider_name: { type: string }
+        appointment_date: { type: string, format: date }
+        start_minutes: { type: integer }
+        end_minutes: { type: integer }
+        service_cost_minor: { type: integer, format: int64 }
+        original_service_cost_minor: { type: integer, format: int64 }
+        discount_minor: { type: integer, format: int64 }
+        service_fee_minor: { type: integer, format: int64 }
+        taxes_minor: { type: integer, format: int64 }
+        total_minor: { type: integer, format: int64 }
+        provider_commission_rate: { type: number }
+        provider_earnings_minor: { type: integer, format: int64 }
+        currency: { type: string }
+        payment_status: { type: string, enum: [pending, paid, refunded] }
+        payment_method: { type: string }
+        confirmation_code: { type: string }
+        status: { type: string, enum: [confirmed, declined, cancelled, completed, no_show] }
+        customer_reschedule_count: { type: integer }
+        offerings: { type: array, items: { $ref: '#/components/schemas/AppointmentOffering' } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateAppointmentRequest:
+      type: object
+      required: [staff_id, appointment_date, start_minutes, offering_ids, customer_name, customer_email, customer_phone, payment_method]
+      properties:
+        staff_id: { type: string, format: uuid }
+        appointment_date: { type: string, format: date }
+        start_minutes: { type: integer, minimum: 0, maximum: 1439, multipleOf: 30 }
+        offering_ids: { type: array, minItems: 1, uniqueItems: true, items: { type: string, format: uuid } }
+        customer_name: { type: string }
+        customer_email: { type: string, format: email }
+        customer_phone: { type: string }
+        payment_method: { type: string }
+    AvailableSlots:
+      type: object
+      required: [staff_id, appointment_date, duration_minutes, start_minutes]
+      properties:
+        staff_id: { type: string, format: uuid }
+        appointment_date: { type: string, format: date }
+        duration_minutes: { type: integer }
+        start_minutes: { type: array, items: { type: integer, minimum: 0, maximum: 1410, multipleOf: 30 } }
+    RescheduleAppointmentRequest:
+      type: object
+      required: [appointment_date, start_minutes]
+      properties:
+        appointment_date: { type: string, format: date }
+        start_minutes: { type: integer, minimum: 0, maximum: 1410, multipleOf: 30 }
+    ServiceSearchItem:
+      type: object
+      required: [id, owner_id, name, category_id, average_rating, review_count, lowest_price_minor]
+      properties:
+        id: { type: string, format: uuid }
+        owner_id: { type: string }
+        name: { type: string }
+        category_id: { type: string }
+        city: { type: string, nullable: true }
+        average_rating: { type: number }
+        review_count: { type: integer }
+        lowest_price_minor: { type: integer, format: int64 }
+    DevelopmentSeedResult:
+      type: object
+      required: [created]
+      properties:
+        created: { type: integer, minimum: 0 }
+    UpdateBusinessRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string }
+        category_id: { type: string }
+        short_description: { type: string, nullable: true }
+        status: { type: string, enum: [active, inactive] }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            request_id: { type: string }
+  responses:
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ForbiddenError:
+      description: Authenticated user is not allowed to perform the action
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFoundError:
+      description: Requested resource was not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
