@@ -1,0 +1,3 @@
+-- The backfill cannot be reversed safely: collection assignments may have
+-- subsequently been edited by a provider. The down migration is deliberately
+-- a no-op.

@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS service_appointments_staff_earnings_metrics_idx;

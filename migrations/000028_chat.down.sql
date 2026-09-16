@@ -1,0 +1,13 @@
+DROP TRIGGER IF EXISTS chat_participant_state_notify_changed ON chat_participant_state;
+DROP TRIGGER IF EXISTS chat_messages_notify_changed ON chat_messages;
+DROP TRIGGER IF EXISTS chat_conversations_notify_changed ON chat_conversations;
+DROP FUNCTION IF EXISTS notify_chat_changed();
+DROP TABLE IF EXISTS chat_push_outbox;
+ALTER TABLE IF EXISTS chat_conversations DROP CONSTRAINT IF EXISTS chat_conversations_last_message_fkey;
+ALTER TABLE IF EXISTS chat_participant_state DROP CONSTRAINT IF EXISTS chat_participant_state_last_read_message_fkey;
+ALTER TABLE IF EXISTS chat_messages DROP CONSTRAINT IF EXISTS chat_messages_sender_participant_fkey;
+DROP TABLE IF EXISTS chat_messages;
+DROP TABLE IF EXISTS chat_participant_state;
+DROP TABLE IF EXISTS chat_conversations;
+DROP TYPE IF EXISTS chat_push_status;
+DROP TYPE IF EXISTS chat_participant_role;

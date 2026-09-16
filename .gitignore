@@ -1,0 +1,25 @@
+.env
+.env.*
+!.env.example
+
+bin/
+coverage.out
+coverage/
+*.coverprofile
+*.test
+*.prof
+*.pprof
+*.trace
+dist/
+/tmp/
+
+# Firebase Admin credentials
+service-account*.json
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
